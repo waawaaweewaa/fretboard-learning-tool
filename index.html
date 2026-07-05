@@ -1,0 +1,473 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Fretboard Navigator</title>
+<link rel="manifest" href="./manifest.json">
+<link rel="apple-touch-icon" href="./icon-180.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Fretboard">
+<meta name="theme-color" content="#0d1117">
+<script>
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("./sw.js").catch(()=>{});
+  });
+}
+</script>
+<style>
+  :root { --tap: 44px; }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  body {
+    margin: 0; padding: 16px 12px 40px;
+    font-family: 'Avenir Next','Segoe UI',system-ui,sans-serif;
+    background: var(--bg); color: var(--text);
+    transition: background .25s, color .25s;
+  }
+  body[data-theme="night"] {
+    --bg:#0d1117; --panel:#151b24; --text:#c9d4e3; --dim:#5d6b80;
+    --btnbg:#1c2530; --btnbd:#33405266;
+    --root:#ffb454; --third:#e9eef6; --fifth:#5cb3ff; --penta:#5cb3ff;
+    --ghost:#2a3547; --line:#2b3442; --fret:#394456; --nut:#c9d4e3;
+    --marker:#222b38; --frame:#8aa0b8; --dottext:#0d1117;
+  }
+  body[data-theme="day"] {
+    --bg:#f4f5f7; --panel:#ffffff; --text:#20293a; --dim:#68758c;
+    --btnbg:#eceff4; --btnbd:#c8d1de;
+    --root:#d9730d; --third:#2b3442; --fifth:#1d6fd1; --penta:#1d6fd1;
+    --ghost:#d7dee8; --line:#b9c3d2; --fret:#a7b2c4; --nut:#20293a;
+    --marker:#dfe5ee; --frame:#5d6f8a; --dottext:#ffffff;
+  }
+  .wrap { max-width: 920px; margin: 0 auto; }
+  h1 { font-size: 17px; margin: 0; letter-spacing: .04em; }
+  .sub { font-size: 11px; color: var(--dim); margin: 4px 0 12px; }
+  .panel { background: var(--panel); border-radius: 12px; padding: 12px; margin-bottom: 12px; }
+  .lbl { font-size: 11px; color: var(--dim); letter-spacing: .08em; margin-bottom: 8px; }
+  .row { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+  button {
+    min-height: var(--tap); min-width: var(--tap);
+    background: var(--btnbg); color: var(--text);
+    border: 1px solid var(--btnbd); border-radius: 9px;
+    padding: 8px 12px; font-size: 14px; font-family: inherit; cursor: pointer;
+  }
+  button.on { background: var(--root); color: var(--dottext); border-color: var(--root); font-weight: 700; }
+  .title { font-size: 16px; font-weight: 700; }
+  .info { font-size: 12px; color: var(--dim); margin-top: 2px; }
+  .legend { font-size: 12px; color: var(--dim); margin-top: 8px; line-height: 1.5; }
+  .foot { font-size: 11px; color: var(--dim); margin-top: 12px; line-height: 1.6; }
+  svg { width: 100%; display: block; margin-top: 8px; }
+  .spread { display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 8px; }
+  .theme { position: fixed; top: 10px; right: 10px; z-index: 5; border-radius: 20px; }
+</style>
+</head>
+<body data-theme="night">
+<button class="theme" id="themeBtn">☾ night</button>
+<div class="wrap">
+  <h1>FRETBOARD NAVIGATOR</h1>
+  <div class="sub">standard tuning · root labeled by computed position, never by finger</div>
+
+  <div class="panel">
+    <div class="lbl">ROOT / KEY — assumed from your ear (bass line), verify by sound</div>
+    <div class="row" id="rootRow"></div>
+    <div class="row" style="margin-top:8px">
+      <button id="qMinor">minor</button>
+      <button id="qMajor">major</button>
+      <span style="width:10px"></span>
+      <button id="vTriad">Triad shapes</button>
+      <button id="vPenta">Pentatonic boxes</button>
+      <button id="vSong">Song builder</button>
+      <button id="wheelBtn">Camelot wheel</button>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="spread">
+      <div>
+        <div class="title" id="hdr"></div>
+        <div class="info" id="inf"></div>
+      </div>
+      <div class="row" id="nav"></div>
+    </div>
+    <div id="board"></div>
+    <div class="spread">
+      <div class="legend" id="leg"></div>
+      <button id="jump" style="display:none">→ nearest pentatonic box</button>
+    </div>
+  </div>
+
+  <div class="panel" id="wheelPanel" style="display:none">
+    <div class="lbl">CAMELOT REFERENCE — outer ring major, inner ring relative minor</div>
+    <div id="wheelBox"></div>
+    <div class="foot" style="margin-top:8px">
+      Compatible moves: same number A↔B (relative keys, identical notes) · ±1 number in the same ring.
+      Tap a wedge to load that key into the selector — in Song builder, follow with "Set key" to commit.
+    </div>
+  </div>
+
+  <div class="foot">
+    Signature check: major = (4,3) root · (3,5) 1st inv · (5,4) 2nd inv — minor = (3,4) · (4,5) · (5,3).
+    If a shape you finger doesn't match one of these six gap patterns, it isn't a plain triad.
+  </div>
+</div>
+
+<script>
+// ---------- engine ----------
+const PC=["C","C#","D","D#","E","F","F#","G","G#","A","A#","B"];
+const OPEN=[40,45,50,55,59,64], SN=["E","A","D","G","B","e"], FRETS=15;
+const oPC=s=>OPEN[s]%12;
+const PENTA={minor:[0,3,5,7,10],major:[0,2,4,7,9]};
+const TRIAD={minor:[0,3,7],major:[0,4,7]};
+const IORD=[[0,1,2],[1,2,0],[2,0,1]];
+const INAMES=["Root position","1st inversion","2nd inversion"];
+const IBASS=["bass = Root","bass = 3rd","bass = 5th"];
+const DEG={major:["R","3","5"],minor:["R","♭3","5"]};
+const SETS=[[0,1,2],[1,2,3],[2,3,4],[3,4,5]];
+const setLbl=set=>set.map(s=>SN[s]).join("–");
+// extensions as shell voicings (5th replaced)
+const EXT={
+  none:{iv:7,deg:"5",lbl:{major:"",minor:"m"}},
+  b7:{iv:10,deg:"♭7",lbl:{major:"7",minor:"m7"}},
+  maj7:{iv:11,deg:"7",lbl:{major:"maj7",minor:"m(maj7)"}},
+  add9:{iv:2,deg:"9",lbl:{major:"add9",minor:"m(add9)"}},
+};
+const chordName=ch=>PC[ch.root]+EXT[ch.ext||"none"].lbl[ch.quality];
+// key / chord-status
+const DIA={
+  major:{degs:[0,2,4,5,7,9],quals:["major","minor","minor","major","major","minor"]},
+  minor:{degs:[0,3,5,7,8,10],quals:["minor","major","minor","minor","major","major"]},
+};
+function chordStatus(kpc,kq,root,q){
+  const rel=(root-kpc+12)%12;
+  const inSet=x=>DIA[x].degs.some((d,i)=>d===rel&&DIA[x].quals[i]===q);
+  if(inSet(kq))return"green";
+  if(kq==="minor"&&rel===7&&q==="major")return"green";
+  if(inSet(kq==="major"?"minor":"major"))return"yellow";
+  return"red";
+}
+const LIGHT={green:{c:"#3ddc84",sym:"✓",txt:"in key"},yellow:{c:"#ffd24d",sym:"≈",txt:"borrowed"},red:{c:"#ff5d5d",sym:"✕",txt:"out of key"}};
+// Camelot mapping (standard 12A/12B system)
+const camB=n=>(11+7*(n-1))%12, camA=n=>(camB(n)+9)%12;
+const camHue=n=>((180-n*30)%360+360)%360;
+
+function pentaFrets(str,root,mode){
+  const pcs=PENTA[mode].map(iv=>(root+iv)%12), out=[];
+  for(let f=0;f<=FRETS+5;f++) if(pcs.includes((oPC(str)+f)%12)) out.push(f);
+  return out;
+}
+function buildBox(root,mode,k){
+  const rfe=(root-oPC(0)+12)%12;
+  let start=rfe+PENTA[mode][k];
+  if(start>12) start-=12;
+  if(start===0) start=12;
+  const notes=[];
+  for(let s=0;s<6;s++){
+    const fr=pentaFrets(s,root,mode);
+    const lowCands=fr.filter(f=>f<=start);
+    const lo=lowCands[lowCands.length-1];
+    const hi=fr.find(f=>f>lo);
+    [lo,hi].forEach(f=>{
+      if(f!==undefined&&f<=FRETS){
+        const pc=(oPC(s)+f)%12;
+        notes.push({s,f,pc,isRoot:pc===root});
+      }
+    });
+  }
+  return {start,notes};
+}
+function buildTriad(root,q,setIdx,inv,ext){
+  ext=ext||"none";
+  const set=SETS[setIdx];
+  const e=EXT[ext];
+  const tones=[root%12,(root+TRIAD[q][1])%12,(root+e.iv)%12];
+  const degs=[DEG[q][0],DEG[q][1],e.deg];
+  const ord=IORD[inv];
+  const base=set.map((str,i)=>(tones[ord[i]]-oPC(str)+12)%12);
+  let best=null;
+  for(let m=0;m<8;m++){
+    const fr=base.map((f,i)=>f+((m>>i)&1)*12);
+    if(fr.some(f=>f>FRETS)) continue;
+    const sp=Math.max(...fr)-Math.min(...fr), pos=Math.max(...fr);
+    if(!best||sp<best.sp||(sp===best.sp&&pos<best.pos)) best={fr,sp,pos};
+  }
+  const notes=set.map((str,i)=>({s:str,f:best.fr[i],pc:tones[ord[i]],tone:ord[i],deg:degs[ord[i]]}));
+  const midi=notes.map(n=>OPEN[n.s]+n.f);
+  return {notes,gaps:[midi[1]-midi[0],midi[2]-midi[1]],avg:best.fr.reduce((a,b)=>a+b,0)/3};
+}
+function nearestBox(root,mode,avg){
+  let bi=0,bd=1e9;
+  for(let k=0;k<5;k++){
+    const c=buildBox(root,mode,k).start+1.5;
+    const d=Math.min(Math.abs(c-avg),Math.abs(c-12-avg),Math.abs(c+12-avg));
+    if(d<bd){bd=d;bi=k;}
+  }
+  return bi;
+}
+
+// ---------- state ----------
+const st={root:9,quality:"minor",view:"triad",setIdx:1,invIdx:0,boxIdx:0,allInv:false,allBoxes:false,theme:"night",
+  songKey:{pc:9,q:"minor"},chords:[],selIdx:0,showWheel:false};
+
+// ---------- svg ----------
+function cssVar(n){return getComputedStyle(document.body).getPropertyValue(n).trim();}
+function drawBoard(notes,ghosts,windows){
+  const W=860,H=240,L=46,R=16,T=26,B=34;
+  const fw=(W-L-R)/FRETS, sh=(H-T-B)/5;
+  const fx=f=>f===0?L-14:L+(f-0.5)*fw;
+  const sy=s=>T+(5-s)*sh;
+  const c={root:cssVar('--root'),third:cssVar('--third'),fifth:cssVar('--fifth'),penta:cssVar('--penta'),
+    ghost:cssVar('--ghost'),line:cssVar('--line'),fret:cssVar('--fret'),nut:cssVar('--nut'),
+    marker:cssVar('--marker'),dim:cssVar('--dim'),frame:cssVar('--frame'),dt:cssVar('--dottext')};
+  let g='';
+  (windows||[]).forEach((w,i)=>{
+    const x=L+Math.max(w.f0-1,-0.4)*fw+(i%3)*2;
+    const wd=Math.max((Math.min(w.f1,FRETS)-Math.max(w.f0,0.6)+1)*fw-(i%3)*4,fw);
+    const y=(i%3)*4;
+    g+=`<rect x="${x}" y="${T-14+y}" width="${wd}" height="${H-T-B+24-y*2}" rx="8" fill="${c.penta}" opacity="0.05" stroke="${c.frame}" stroke-opacity="0.5" stroke-dasharray="4 4"/>`;
+    g+=`<text x="${x+7}" y="${T-3+y}" font-size="10" font-weight="600" fill="${c.frame}">${w.label}</text>`;
+  });
+  for(let f=0;f<=FRETS;f++)
+    g+=`<line x1="${L+f*fw}" y1="${T}" x2="${L+f*fw}" y2="${H-B}" stroke="${f===0?c.nut:c.fret}" stroke-width="${f===0?3:1}"/>`;
+  for(let s=0;s<6;s++)
+    g+=`<line x1="${L}" y1="${sy(s)}" x2="${W-R}" y2="${sy(s)}" stroke="${c.line}" stroke-width="${0.8+s*0.25}"/>`;
+  [3,5,7,9,15].forEach(f=>{g+=`<circle cx="${L+(f-0.5)*fw}" cy="${H/2-4}" r="4" fill="${c.marker}"/>`;});
+  g+=`<circle cx="${L+11.5*fw}" cy="${sy(4)+sh/2}" r="4" fill="${c.marker}"/><circle cx="${L+11.5*fw}" cy="${sy(1)+sh/2}" r="4" fill="${c.marker}"/>`;
+  [3,5,7,9,12,15].forEach(f=>{g+=`<text x="${L+(f-0.5)*fw}" y="${H-10}" text-anchor="middle" font-size="11" fill="${c.dim}">${f}</text>`;});
+  for(let s=0;s<6;s++)
+    g+=`<text x="${L-30}" y="${sy(s)+4}" font-size="12" fill="${c.dim}" font-family="ui-monospace,monospace">${SN[s]}</text>`;
+  (ghosts||[]).forEach(n=>{g+=`<circle cx="${fx(n.f)}" cy="${sy(n.s)}" r="6" fill="${c.ghost}"/>`;});
+  notes.forEach(n=>{
+    const isRoot=n.deg==="R"||n.isRoot;
+    const fill=isRoot?c.root:n.tone===2?c.fifth:n.tone===1?c.third:c.penta;
+    g+=`<circle cx="${fx(n.f)}" cy="${sy(n.s)}" r="12" fill="${fill}"/>`;
+    g+=`<text x="${fx(n.f)}" y="${sy(n.s)+4}" text-anchor="middle" font-size="10.5" font-weight="700" fill="${c.dt}" font-family="ui-monospace,monospace">${n.deg?n.deg:PC[n.pc]}</text>`;
+  });
+  return `<svg viewBox="0 0 ${W} ${H}">${g}</svg>`;
+}
+
+// ---------- render ----------
+const $=id=>document.getElementById(id);
+function navBtn(txt,fn,on){
+  const b=document.createElement('button'); b.textContent=txt;
+  if(on) b.className='on'; b.onclick=()=>{fn();render();}; return b;
+}
+function render(){
+  document.body.dataset.theme=st.theme;
+  $('themeBtn').textContent=st.theme==="night"?"☾ night":"☀ day";
+  // root row
+  const rr=$('rootRow'); rr.innerHTML='';
+  PC.forEach((n,i)=>rr.appendChild(navBtn(n,()=>{st.root=i;},i===st.root)));
+  $('qMinor').className=st.quality==="minor"?"on":"";
+  $('qMajor').className=st.quality==="major"?"on":"";
+  $('qMinor').onclick=()=>{st.quality="minor";render();};
+  $('qMajor').onclick=()=>{st.quality="major";render();};
+  $('vTriad').className=st.view==="triad"?"on":"";
+  $('vPenta').className=st.view==="penta"?"on":"";
+  $('vSong').className=st.view==="song"?"on":"";
+  $('vTriad').onclick=()=>{st.view="triad";render();};
+  $('vPenta').onclick=()=>{st.view="penta";render();};
+  $('vSong').onclick=()=>{st.view="song";render();};
+
+  const nav=$('nav'); nav.innerHTML='';
+  const cyc=(v,d,n)=>(v+d+n)%n;
+
+  if(st.view==="triad"){
+    const t=buildTriad(st.root,st.quality,st.setIdx,st.invIdx);
+    $('hdr').textContent=`${PC[st.root]}${st.quality==="minor"?"m":""} · ${st.allInv?"All inversions":INAMES[st.invIdx]} · strings ${setLbl(SETS[st.setIdx])}`;
+    $('inf').textContent=st.allInv
+      ? "shared notes between adjacent shapes are drawn once"
+      : `${IBASS[st.invIdx]} · gap signature (${t.gaps[0]},${t.gaps[1]}) semitones`;
+    nav.appendChild(navBtn("All inversions",()=>{st.allInv=!st.allInv;},st.allInv));
+    if(!st.allInv){
+      nav.appendChild(navBtn("◂ inv",()=>{st.invIdx=cyc(st.invIdx,-1,3);}));
+      nav.appendChild(navBtn("inv ▸",()=>{st.invIdx=cyc(st.invIdx,1,3);}));
+    }
+    nav.appendChild(navBtn("▾ strings",()=>{st.setIdx=cyc(st.setIdx,-1,4);}));
+    nav.appendChild(navBtn("strings ▴",()=>{st.setIdx=cyc(st.setIdx,1,4);}));
+    if(st.allInv){
+      const shapes=[0,1,2].map(k=>buildTriad(st.root,st.quality,st.setIdx,k));
+      const seen={},notes=[];
+      shapes.forEach(sh=>sh.notes.forEach(n=>{const k=n.s+"-"+n.f; if(!seen[k]){seen[k]=1;notes.push(n);}}));
+      const wins=shapes.map((sh,k)=>({f0:Math.min(...sh.notes.map(n=>n.f)),f1:Math.max(...sh.notes.map(n=>n.f)),label:["Root pos","1st inv","2nd inv"][k]}));
+      $('board').innerHTML=drawBoard(notes,[],wins);
+    } else {
+      $('board').innerHTML=drawBoard(t.notes,[],[]);
+    }
+    $('leg').innerHTML=`<span style="color:var(--root)">●</span> root · <span style="color:var(--third)">●</span> 3rd · <span style="color:var(--fifth)">●</span> 5th — notes: ${t.notes.map(n=>PC[n.pc]).join(" · ")}`;
+    $('jump').style.display='';
+    $('jump').onclick=()=>{st.boxIdx=nearestBox(st.root,st.quality,t.avg);st.allBoxes=false;st.view="penta";render();};
+  } else if(st.view==="penta"){
+    const b=buildBox(st.root,st.quality,st.boxIdx);
+    $('hdr').textContent=`${PC[st.root]} ${st.quality} pentatonic · ${st.allBoxes?"All 5 boxes":`Box ${st.boxIdx+1} of 5`}`;
+    $('inf').textContent=st.allBoxes
+      ? "overlapping frames show how boxes tile — edge notes belong to two boxes at once"
+      : `window around fret ${b.start} · faint dots = same scale outside this box`;
+    nav.appendChild(navBtn("All boxes",()=>{st.allBoxes=!st.allBoxes;},st.allBoxes));
+    if(!st.allBoxes){
+      nav.appendChild(navBtn("◂ box down",()=>{st.boxIdx=cyc(st.boxIdx,-1,5);}));
+      nav.appendChild(navBtn("box up ▸",()=>{st.boxIdx=cyc(st.boxIdx,1,5);}));
+    }
+    if(st.allBoxes){
+      const seen={},notes=[],wins=[];
+      for(let k=0;k<5;k++){
+        const bb=buildBox(st.root,st.quality,k);
+        wins.push({f0:bb.start,f1:bb.start+4,label:"Box "+(k+1)});
+        bb.notes.forEach(n=>{const key=n.s+"-"+n.f; if(!seen[key]){seen[key]=1;notes.push({...n,deg:n.isRoot?"R":null,tone:n.isRoot?0:3});}});
+      }
+      $('board').innerHTML=drawBoard(notes,[],wins);
+    } else {
+      const ghosts=[];
+      for(let s=0;s<6;s++) pentaFrets(s,st.root,st.quality).filter(f=>f<=FRETS).forEach(f=>ghosts.push({s,f}));
+      const bn=b.notes.map(n=>({...n,deg:n.isRoot?"R":null,tone:n.isRoot?0:3}));
+      $('board').innerHTML=drawBoard(bn,ghosts,[{f0:b.start,f1:b.start+4,label:"Box "+(st.boxIdx+1)}]);
+    }
+    $('leg').innerHTML=`<span style="color:var(--root)">●</span> root (${PC[st.root]}) · <span style="color:var(--penta)">●</span> scale tone · <span style="color:var(--ghost)">●</span> out-of-box — walk these to your next bass root`;
+    $('jump').style.display='none';
+  } else {
+    // ---------- song builder ----------
+    $('hdr').textContent=`Song key: ${PC[st.songKey.pc]}${st.songKey.q==="minor"?"m":""}`;
+    $('inf').textContent="key and chords come from the selector up top — pick root + quality, then tap a button";
+    nav.appendChild(navBtn(`Set key = ${PC[st.root]}${st.quality==="minor"?"m":""}`,()=>{st.songKey={pc:st.root,q:st.quality};}));
+    nav.appendChild(navBtn(`+ Add ${PC[st.root]}${st.quality==="minor"?"m":""}`,()=>{
+      st.chords.push({root:st.root,quality:st.quality,setIdx:1,invIdx:0,ext:"none"});
+      st.selIdx=st.chords.length-1;
+    }));
+    let html='';
+    if(st.chords.length===0){
+      html=`<div style="font-size:13px;color:var(--dim);padding:16px 4px">No chords yet. Set root + quality above, then "+ Add". Lights:
+        <span style="color:${LIGHT.green.c}">✓ in key</span> ·
+        <span style="color:${LIGHT.yellow.c}">≈ borrowed</span> ·
+        <span style="color:${LIGHT.red.c}">✕ out of key</span></div>`;
+    } else {
+      // chip strip
+      html+='<div style="display:flex;gap:8px;flex-wrap:wrap;margin:6px 0 10px">';
+      st.chords.forEach((ch,i)=>{
+        const lt=LIGHT[chordStatus(st.songKey.pc,st.songKey.q,ch.root,ch.quality)];
+        const sel=i===st.selIdx;
+        html+=`<span onclick="selChord(${i})" style="display:inline-flex;align-items:center;gap:6px;cursor:pointer;
+          background:${sel?'var(--btnbg)':'transparent'};border:1px solid ${sel?'var(--root)':'var(--btnbd)'};
+          border-radius:10px;padding:8px 10px;font-size:14px;${sel?'font-weight:700':''}">
+          <span style="width:14px;height:14px;border-radius:50%;background:${lt.c};color:#10151d;font-size:9px;font-weight:800;display:inline-flex;align-items:center;justify-content:center">${lt.sym}</span>
+          ${chordName(ch)}
+          <span style="font-size:10px;color:var(--dim)">${INAMES[ch.invIdx].split(" ")[0]} · ${setLbl(SETS[ch.setIdx])}</span>
+          <span onclick="event.stopPropagation();delChord(${i})" style="color:var(--dim);padding-left:2px">×</span></span>`;
+      });
+      html+='</div>';
+      const ch=st.chords[st.selIdx];
+      if(ch){
+        const t=buildTriad(ch.root,ch.quality,ch.setIdx,ch.invIdx,ch.ext);
+        const lt=LIGHT[chordStatus(st.songKey.pc,st.songKey.q,ch.root,ch.quality)];
+        html+=`<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+          <div style="font-size:13px"><b>${chordName(ch)}</b>
+            <span style="color:${lt.c}"> ${lt.sym} ${lt.txt}</span>
+            <span style="color:var(--dim)"> · ${INAMES[ch.invIdx]} · ${setLbl(SETS[ch.setIdx])} · gaps (${t.gaps[0]},${t.gaps[1]})${ch.ext!=="none"?" · shell — 5th dropped":""}</span></div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <button onclick="chInv(-1)">◂ inv</button><button onclick="chInv(1)">inv ▸</button>
+            <button onclick="chSet(-1)">▾ strings</button><button onclick="chSet(1)">strings ▴</button></div></div>
+          <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px;align-items:center">
+            <span style="font-size:11px;color:var(--dim);letter-spacing:.06em">EXTENSION</span>`;
+        [["none","triad"],["b7","♭7"],["maj7","maj7"],["add9","add9"]].forEach(([k,l])=>{
+          html+=`<button class="${ch.ext===k?'on':''}" onclick="chExt('${k}')">${l}</button>`;
+        });
+        html+=`</div>${drawBoard(t.notes,[],[])}`;
+        // progression grid
+        html+=`<div style="font-size:11px;color:var(--dim);letter-spacing:.08em;margin:14px 0 8px">PROGRESSION AT A GLANCE — tap a card to edit</div>
+          <div style="display:flex;gap:10px;flex-wrap:wrap">`;
+        st.chords.forEach((c2,i)=>{
+          const t2=buildTriad(c2.root,c2.quality,c2.setIdx,c2.invIdx,c2.ext);
+          const l2=LIGHT[chordStatus(st.songKey.pc,st.songKey.q,c2.root,c2.quality)];
+          html+=`<div onclick="selChord(${i})" style="cursor:pointer;border-radius:10px;padding:8px 10px;width:190px;
+            background:${i===st.selIdx?'var(--btnbg)':'transparent'};border:1px solid ${i===st.selIdx?'var(--root)':'var(--btnbd)'}">
+            <div style="display:flex;align-items:center;gap:6px;margin-bottom:2px">
+              <span style="width:12px;height:12px;border-radius:50%;background:${l2.c};color:#10151d;font-size:8px;font-weight:800;display:inline-flex;align-items:center;justify-content:center">${l2.sym}</span>
+              <span style="font-size:13px;font-weight:700">${chordName(c2)}</span>
+              <span style="font-size:10px;color:var(--dim);margin-left:auto">${INAMES[c2.invIdx].split(" ")[0]} · ${setLbl(SETS[c2.setIdx])}</span></div>
+            ${miniSvg(t2.notes)}</div>`;
+        });
+        html+='</div>';
+      }
+      html+=`<div style="font-size:11px;color:var(--dim);margin-top:10px;line-height:1.6">
+        Light rule — ✓ diatonic (harmonic-minor V allowed) · ≈ borrowed from the parallel key: trust your ear · ✕ neither.
+        The light judges the triad only; extensions aren't graded. Extensions are shells: the 5th is dropped to stay on 3 strings.</div>`;
+    }
+    $('board').innerHTML=html;
+    $('leg').innerHTML='';
+    $('jump').style.display='none';
+  }
+  // wheel
+  $('wheelBtn').className=st.showWheel?"on":"";
+  $('wheelBtn').onclick=()=>{st.showWheel=!st.showWheel;render();};
+  $('wheelPanel').style.display=st.showWheel?"":"none";
+  if(st.showWheel) $('wheelBox').innerHTML=camelotSvg();
+}
+
+// ---------- mini chord diagram ----------
+function miniSvg(notes){
+  const lo=Math.min(...notes.map(n=>n.f)), hi=Math.max(...notes.map(n=>n.f));
+  const base=Math.max(0,lo-1), span=Math.max(5,hi-base);
+  const W=168,H=108,L=16,R=8,T=8,B=18;
+  const fw=(W-L-R)/span, sh=(H-T-B)/5;
+  const c=cssVarSet();
+  const fx=f=>f===0?L-7:L+(f-base-0.5)*fw, sy=s=>T+(5-s)*sh;
+  let g='';
+  for(let i=0;i<=span;i++)
+    g+=`<line x1="${L+i*fw}" y1="${T}" x2="${L+i*fw}" y2="${H-B}" stroke="${base===0&&i===0?c.nut:c.fret}" stroke-width="${base===0&&i===0?3:1}"/>`;
+  for(let s=0;s<6;s++)
+    g+=`<line x1="${L}" y1="${sy(s)}" x2="${W-R}" y2="${sy(s)}" stroke="${c.line}" stroke-width="${0.7+s*0.2}"/>`;
+  g+=`<text x="${L+0.5*fw}" y="${H-5}" text-anchor="middle" font-size="9" fill="${c.dim}">fr ${base===0?1:base+1}</text>`;
+  notes.forEach(n=>{
+    const fill=n.tone===0?c.root:n.tone===1?c.third:c.fifth;
+    g+=`<circle cx="${fx(n.f)}" cy="${sy(n.s)}" r="8.5" fill="${fill}"/>
+        <text x="${fx(n.f)}" y="${sy(n.s)+3}" text-anchor="middle" font-size="8" font-weight="700" fill="${c.dt}" font-family="ui-monospace,monospace">${n.deg}</text>`;
+  });
+  return `<svg viewBox="0 0 ${W} ${H}" style="width:100%;display:block">${g}</svg>`;
+}
+function cssVarSet(){
+  const v=n=>getComputedStyle(document.body).getPropertyValue(n).trim();
+  return {root:v('--root'),third:v('--third'),fifth:v('--fifth'),line:v('--line'),fret:v('--fret'),nut:v('--nut'),dim:v('--dim'),dt:v('--dottext'),text:v('--text'),panel:v('--panel'),bg:v('--bg')};
+}
+
+// ---------- Camelot wheel (standard 12A/12B system, built from scratch) ----------
+function camelotSvg(){
+  const S=360,cx=S/2,cy=S/2,rH=52,rM=106,rO=168;
+  const c=cssVarSet();
+  const night=st.theme==="night";
+  const P=(r,d)=>{const a=(d-90)*Math.PI/180;return[cx+r*Math.cos(a),cy+r*Math.sin(a)];};
+  const wedge=(r0,r1,a0,a1)=>{
+    const[x0,y0]=P(r1,a0),[x1,y1]=P(r1,a1),[x2,y2]=P(r0,a1),[x3,y3]=P(r0,a0);
+    return`M${x0},${y0} A${r1},${r1} 0 0 1 ${x1},${y1} L${x2},${y2} A${r0},${r0} 0 0 0 ${x3},${y3} Z`;
+  };
+  const fO=(h,hot)=>night?`hsl(${h},${hot?60:42}%,${hot?38:29}%)`:`hsl(${h},${hot?75:58}%,${hot?70:81}%)`;
+  const fI=(h,hot)=>night?`hsl(${h},${hot?55:32}%,${hot?32:22}%)`:`hsl(${h},${hot?65:48}%,${hot?78:88}%)`;
+  let g='';
+  for(let n=1;n<=12;n++){
+    const a0=n*30-15,a1=n*30+15,mid=n*30,h=camHue(n);
+    const selB=st.quality==="major"&&st.root===camB(n), selA=st.quality==="minor"&&st.root===camA(n);
+    const[bx,by]=P((rM+rO)/2,mid),[ax,ay]=P((rH+rM)/2+4,mid);
+    g+=`<path d="${wedge(rM,rO,a0,a1)}" fill="${fO(h,selB)}" stroke="${c.bg}" stroke-width="2" style="cursor:pointer" onclick="pickKey(${camB(n)},'major')"/>
+        <path d="${wedge(rH,rM,a0,a1)}" fill="${fI(h,selA)}" stroke="${c.bg}" stroke-width="2" style="cursor:pointer" onclick="pickKey(${camA(n)},'minor')"/>
+        <text x="${bx}" y="${by-3}" text-anchor="middle" font-size="13" font-weight="700" fill="${c.text}" pointer-events="none">${n}B</text>
+        <text x="${bx}" y="${by+11}" text-anchor="middle" font-size="11" fill="${c.text}" opacity="0.85" pointer-events="none">${PC[camB(n)]}</text>
+        <text x="${ax}" y="${ay-2}" text-anchor="middle" font-size="11" font-weight="700" fill="${c.text}" pointer-events="none">${n}A</text>
+        <text x="${ax}" y="${ay+10}" text-anchor="middle" font-size="10" fill="${c.text}" opacity="0.85" pointer-events="none">${PC[camA(n)]}m</text>`;
+  }
+  g+=`<circle cx="${cx}" cy="${cy}" r="${rH-2}" fill="${c.panel}"/>
+      <text x="${cx}" y="${cy-2}" text-anchor="middle" font-size="11" font-weight="700" fill="${c.text}">CAMELOT</text>
+      <text x="${cx}" y="${cy+12}" text-anchor="middle" font-size="9" fill="${c.dim}">tap = set key</text>`;
+  return `<svg viewBox="0 0 ${S} ${S}" style="width:100%;max-width:400px;display:block;margin:0 auto">${g}</svg>`;
+}
+
+// ---------- global handlers for inline onclick ----------
+function selChord(i){st.selIdx=i;render();}
+function delChord(i){st.chords.splice(i,1);st.selIdx=Math.max(0,Math.min(st.selIdx,st.chords.length-1));render();}
+function chInv(d){const ch=st.chords[st.selIdx];if(ch){ch.invIdx=(ch.invIdx+d+3)%3;render();}}
+function chSet(d){const ch=st.chords[st.selIdx];if(ch){ch.setIdx=(ch.setIdx+d+4)%4;render();}}
+function chExt(k){const ch=st.chords[st.selIdx];if(ch){ch.ext=k;render();}}
+function pickKey(pc,q){st.root=pc;st.quality=q;render();}
+$('themeBtn').onclick=()=>{st.theme=st.theme==="night"?"day":"night";render();};
+render();
+</script>
+</body>
+</html>
