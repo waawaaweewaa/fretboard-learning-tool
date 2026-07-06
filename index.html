@@ -22,7 +22,7 @@ if ("serviceWorker" in navigator) {
   :root { --tap: 44px; }
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
   body {
-    margin: 0; padding: 16px 12px 40px;
+    margin: 0; padding: calc(16px + env(safe-area-inset-top)) 12px calc(40px + env(safe-area-inset-bottom));
     font-family: 'Avenir Next','Segoe UI',system-ui,sans-serif;
     background: var(--bg); color: var(--text);
     transition: background .25s, color .25s;
@@ -60,7 +60,7 @@ if ("serviceWorker" in navigator) {
   .foot { font-size: 11px; color: var(--dim); margin-top: 12px; line-height: 1.6; }
   svg { width: 100%; display: block; margin-top: 8px; }
   .spread { display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 8px; }
-  .theme { position: fixed; top: 10px; right: 10px; z-index: 5; border-radius: 20px; }
+  .theme { position: fixed; top: calc(10px + env(safe-area-inset-top)); right: calc(10px + env(safe-area-inset-right)); z-index: 5; border-radius: 20px; }
 </style>
 </head>
 <body data-theme="night">
