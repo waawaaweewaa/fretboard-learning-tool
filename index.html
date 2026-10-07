@@ -67,10 +67,57 @@ if ("serviceWorker" in navigator) {
   svg { width: 100%; display: block; margin-top: 8px; }
   .spread { display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 8px; }
   .theme { position: fixed; top: calc(10px + env(safe-area-inset-top)); right: calc(10px + env(safe-area-inset-right)); z-index: 5; border-radius: 20px; }
+  .topbar { position: fixed; top: calc(10px + env(safe-area-inset-top)); right: calc(10px + env(safe-area-inset-right)); z-index: 6; display: flex; gap: 8px; }
+  .topbar button { border-radius: 20px; }
+  .wrap > h1, .wrap > .sub { padding-right: 200px; }
+  @media (max-width: 520px) { .wrap > h1, .wrap > .sub { padding-right: 0; } .wrap { padding-top: 46px; } }
+  #metroBtn.beat { box-shadow: 0 0 0 3px var(--root); }
+  #metroBtn.playing { border-color: var(--root); }
+  .metro { position: fixed; top: calc(62px + env(safe-area-inset-top)); right: calc(10px + env(safe-area-inset-right)); z-index: 6;
+    width: min(360px, calc(100vw - 20px)); background: var(--panel); border: 1px solid var(--btnbd); border-radius: 14px;
+    padding: 12px; box-shadow: 0 10px 30px rgba(0,0,0,.35); display: none; }
+  .metro.open { display: block; }
+  .metro .mrow { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+  .metro .mrow:last-of-type { margin-bottom: 4px; }
+  .mlights { display: flex; gap: 6px; flex: 1; justify-content: center; }
+  .mlights span { width: 12px; height: 12px; border-radius: 50%; background: var(--ghost); transition: background .05s; }
+  .mlights span.acc { width: 14px; height: 14px; }
+  .mlights span.on { background: var(--fifth); }
+  .mlights span.acc.on { background: var(--root); }
+  .metro input[type=range] { flex: 1; accent-color: var(--root); min-height: 30px; }
+  .metro select { min-height: var(--tap); background: var(--btnbg); color: var(--text); border: 1px solid var(--btnbd); border-radius: 9px; padding: 0 8px; font: inherit; font-size: 14px; }
+  #bpmShow { min-width: 112px; white-space: nowrap; font-size: 17px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  #bpmInput { width: 112px !important; }
+  #bpmInput { width: 92px; min-height: var(--tap); font: inherit; font-size: 18px; font-weight: 700; text-align: center; background: var(--btnbg); color: var(--text); border: 1px solid var(--root); border-radius: 9px; display: none; }
+  .mnote { font-size: 11px; color: var(--dim); line-height: 1.5; }
 </style>
 </head>
 <body data-theme="night">
-<button class="theme" id="themeBtn">☾ night</button>
+<div class="topbar">
+  <button id="metroBtn" aria-expanded="false" aria-controls="metro">♩ 120</button>
+  <button id="themeBtn">☾ night</button>
+</div>
+<div class="metro" id="metro" role="dialog" aria-label="Metronome">
+  <div class="mrow">
+    <button id="mPlay">▶ Start</button>
+    <div class="mlights" id="mLights"></div>
+    <select id="mSig" aria-label="Time signature">
+      <option>2/4</option><option>3/4</option><option selected>4/4</option><option>5/4</option><option>6/8</option><option>7/8</option>
+    </select>
+  </div>
+  <div class="mrow">
+    <button id="bpmShow" title="Tap to type a tempo">120 BPM</button>
+    <input id="bpmInput" type="number" inputmode="numeric" min="30" max="300" aria-label="BPM">
+    <input id="bpmSlider" type="range" min="30" max="300" value="120" aria-label="Tempo">
+    <button id="bpmDown" aria-label="Slower">−</button><button id="bpmUp" aria-label="Faster">+</button>
+  </div>
+  <div class="mrow">
+    <span aria-hidden="true">🔊</span>
+    <input id="mVol" type="range" min="0" max="100" value="70" aria-label="Volume">
+    <button id="mAcc" class="on">Accent beat 1</button>
+  </div>
+  <div class="mnote" id="mNote">No sound on iPhone? Check the silent switch. Locking the screen pauses the click.</div>
+</div>
 <div class="wrap">
   <h1>FRETBOARD NAVIGATOR</h1>
   <div class="sub">standard tuning · root labeled by computed position, never by finger</div>
@@ -511,6 +558,90 @@ function pickKey(pc,q){st.root=pc;st.quality=q;render();}
 function pinGhost(k){if(st.pins[k])delete st.pins[k];else st.pins[k]=1;render();}
 $('themeBtn').onclick=()=>{st.theme=st.theme==="night"?"day":"night";render();};
 render();
+
+// ---------- metronome (Web Audio lookahead scheduler) ----------
+const metro={on:false,bpm:120,vol:0.7,accent:true,sig:"4/4",beat:0,next:0,ctx:null,gain:null,timer:null,queue:[]};
+const SIGS={"2/4":{n:2,strong:[0],mid:[]},"3/4":{n:3,strong:[0],mid:[]},"4/4":{n:4,strong:[0],mid:[]},
+  "5/4":{n:5,strong:[0],mid:[]},"6/8":{n:6,strong:[0],mid:[3]},"7/8":{n:7,strong:[0],mid:[2,4]}};
+function mLights(){
+  const g=SIGS[metro.sig], el=$('mLights'); el.innerHTML='';
+  for(let i=0;i<g.n;i++){const d=document.createElement('span');
+    if(metro.accent&&(g.strong.includes(i)||g.mid.includes(i)))d.className='acc';el.appendChild(d);}
+}
+function mClick(t,level){ // level: 2 strong, 1 mid, 0 normal
+  const o=metro.ctx.createOscillator(), e=metro.ctx.createGain();
+  o.frequency.value=level===2?1600:level===1?1250:1000;
+  const peak=level===2?1:level===1?0.8:0.6;
+  e.gain.setValueAtTime(0.0001,t);
+  e.gain.exponentialRampToValueAtTime(peak,t+0.002);
+  e.gain.exponentialRampToValueAtTime(0.0001,t+0.05);
+  o.connect(e).connect(metro.gain); o.start(t); o.stop(t+0.06);
+}
+function mSchedule(){
+  const ctx=metro.ctx, ahead=0.12;
+  if(metro.next<ctx.currentTime-0.05) metro.next=ctx.currentTime+0.05; // came back from background: no catch-up burst
+  while(metro.next<ctx.currentTime+ahead){
+    const g=SIGS[metro.sig], b=metro.beat%g.n;
+    const level=!metro.accent?0:g.strong.includes(b)?2:g.mid.includes(b)?1:0;
+    mClick(metro.next,level);
+    metro.queue.push({t:metro.next,b});
+    metro.next+=60/metro.bpm;
+    metro.beat=(b+1)%g.n;
+  }
+}
+function mDraw(){
+  if(!metro.on)return;
+  const now=metro.ctx.currentTime;
+  while(metro.queue.length&&metro.queue[0].t<=now){
+    const q=metro.queue.shift(), dots=$('mLights').children;
+    [...dots].forEach((d,i)=>d.classList.toggle('on',i===q.b));
+    const btn=$('metroBtn'); btn.classList.add('beat'); setTimeout(()=>btn.classList.remove('beat'),90);
+  }
+  requestAnimationFrame(mDraw);
+}
+function mStart(){
+  if(!metro.ctx){metro.ctx=new (window.AudioContext||window.webkitAudioContext)();
+    metro.gain=metro.ctx.createGain(); metro.gain.connect(metro.ctx.destination);}
+  metro.ctx.resume();
+  metro.gain.gain.value=metro.vol;
+  metro.on=true; metro.beat=0; metro.queue=[]; metro.next=metro.ctx.currentTime+0.06;
+  mSchedule(); metro.timer=setInterval(mSchedule,25); requestAnimationFrame(mDraw);
+  mSync();
+}
+function mStop(){
+  metro.on=false; clearInterval(metro.timer); metro.queue=[];
+  [...$('mLights').children].forEach(d=>d.classList.remove('on'));
+  mSync();
+}
+function mSetBpm(v){
+  v=Math.round(Number(v)); if(!isFinite(v))return;
+  metro.bpm=Math.min(300,Math.max(30,v)); mSync();
+}
+function mSync(){
+  $('mPlay').textContent=metro.on?'■ Stop':'▶ Start';
+  $('mPlay').className=metro.on?'on':'';
+  $('bpmShow').textContent=metro.bpm+' BPM';
+  $('bpmSlider').value=metro.bpm;
+  $('metroBtn').textContent='♩ '+metro.bpm;
+  $('metroBtn').classList.toggle('playing',metro.on);
+  $('mAcc').className=metro.accent?'on':'';
+  $('mAcc').textContent=metro.accent?'Accent beat 1':'All clicks same';
+}
+$('metroBtn').onclick=()=>{const o=$('metro').classList.toggle('open');$('metroBtn').setAttribute('aria-expanded',o);};
+$('mPlay').onclick=()=>metro.on?mStop():mStart();
+$('bpmSlider').oninput=e=>mSetBpm(e.target.value);
+$('bpmDown').onclick=()=>mSetBpm(metro.bpm-1);
+$('bpmUp').onclick=()=>mSetBpm(metro.bpm+1);
+$('bpmShow').onclick=()=>{const i=$('bpmInput');$('bpmShow').style.display='none';i.style.display='block';i.value=metro.bpm;i.focus();i.select();};
+const bpmCommit=()=>{const i=$('bpmInput');if(i.style.display==='none')return;if(i.value!=='')mSetBpm(i.value);i.style.display='none';$('bpmShow').style.display='';};
+$('bpmInput').onblur=bpmCommit;
+$('bpmInput').onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();bpmCommit();}if(e.key==='Escape'){$('bpmInput').value='';bpmCommit();}};
+$('mVol').oninput=e=>{metro.vol=e.target.value/100;if(metro.gain)metro.gain.gain.value=metro.vol;};
+$('mAcc').onclick=()=>{metro.accent=!metro.accent;mLights();mSync();};
+$('mSig').onchange=e=>{metro.sig=e.target.value;metro.beat=0;metro.queue=[];mLights();};
+document.addEventListener('visibilitychange',()=>{if(!document.hidden&&metro.on&&metro.ctx)metro.ctx.resume();});
+mLights(); mSync();
+
 </script>
 </body>
 </html>

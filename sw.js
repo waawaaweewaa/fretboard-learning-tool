@@ -1,6 +1,6 @@
 // Fretboard Navigator service worker
 // Bump CACHE version whenever you update index.html so phones pick up changes.
-const CACHE = "fretnav-v7";
+const CACHE = "fretnav-v8";
 const ASSETS = ["./", "./index.html", "./manifest.json", "./icon-180.png", "./icon-512.png"];
 
 self.addEventListener("install", (e) => {
