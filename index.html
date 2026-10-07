@@ -248,7 +248,7 @@ function drawBoard(notes,ghosts,windows){
   (ghosts||[]).forEach(n=>{
     const ring=n.ring?` stroke="${c.root}" stroke-width="2"`:'';
     if(!n.deg){g+=`<circle cx="${fx(n.f)}" cy="${sy(n.s)}" r="6" fill="${c.ghost}"${ring}/>`;return;}
-    const key=n.s+"-"+n.f, x=fx(n.f), y=sy(n.s);
+    const key=(n.pv||'t')+':'+n.s+'-'+n.f, x=fx(n.f), y=sy(n.s);
     g+=`<g class="gh${st.pins[key]?' pin':''}" onclick="pinGhost('${key}')">
       <rect x="${x-fw/2}" y="${y-sh/2}" width="${fw}" height="${sh}" fill="transparent"/>
       <circle cx="${x}" cy="${y}" r="6" fill="${c.ghost}"${ring}/>
@@ -273,6 +273,9 @@ function navBtn(txt,fn,on,disabled){
   b.onclick=()=>{fn();render();}; return b;
 }
 function render(){
+  const sig=st.root+'/'+st.quality;
+  if(st._sig!==undefined&&st._sig!==sig)st.pins={};
+  st._sig=sig;
   document.body.dataset.theme=st.theme;
   $('themeBtn').textContent=st.theme==="night"?"☾ night":"☀ day";
   // root row
@@ -327,7 +330,7 @@ function render(){
     $('leg').innerHTML=`<span style="color:var(--root)">●</span> root · <span style="color:var(--third)">●</span> 3rd · <span style="color:var(--fifth)">●</span> 5th — notes: ${t.notes.map(n=>PC[n.pc]).join(" · ")}${ovNote}`;
     $('jump').style.display='';
     $('jump').className=st.nearOverlay?"on":"";
-    $('jump').onclick=()=>{st.nearOverlay=!st.nearOverlay;if(!st.nearOverlay)st.pins={};render();};
+    $('jump').onclick=()=>{st.nearOverlay=!st.nearOverlay;if(!st.nearOverlay)Object.keys(st.pins).forEach(k=>{if(k.startsWith('t:'))delete st.pins[k];});render();};
   } else if(st.view==="penta"){
     const b=buildBox(st.root,st.quality,st.boxIdx);
     $('hdr').textContent=`${PC[st.root]} ${st.quality} pentatonic · ${st.allBoxes?"All 5 boxes":`Box ${st.boxIdx+1} of 5`}`;
@@ -349,11 +352,11 @@ function render(){
       $('board').innerHTML=drawBoard(notes,[],wins);
     } else {
       const ghosts=[];
-      for(let s=0;s<6;s++) pentaFrets(s,st.root,st.quality).filter(f=>f<=FRETS).forEach(f=>ghosts.push({s,f}));
+      for(let s=0;s<6;s++) pentaFrets(s,st.root,st.quality).filter(f=>f<=FRETS).forEach(f=>{const pc=(oPC(s)+f)%12;ghosts.push({s,f,pv:'p',ring:pc===st.root,deg:pc===st.root?"R":pDeg(pc,st.root,st.quality)});});
       const bn=b.notes.map(n=>({...n,deg:lab(n),tone:n.isRoot?0:3}));
       $('board').innerHTML=drawBoard(bn,ghosts,[{f0:b.lo,f1:b.hi,label:"Box "+(st.boxIdx+1)}]);
     }
-    $('leg').innerHTML=`<span style="color:var(--root)">●</span> root (${PC[st.root]}) · <span style="color:var(--penta)">●</span> scale tone ${st.degLabels?`— degrees: ${PDEG[st.quality].join(" ")}`:"— note names"} · <span style="color:var(--ghost)">●</span> out-of-box — walk these to your next bass root`;
+    $('leg').innerHTML=`<span style="color:var(--root)">●</span> root (${PC[st.root]}) · <span style="color:var(--penta)">●</span> scale tone ${st.degLabels?`— degrees: ${PDEG[st.quality].join(" ")}`:"— note names"} · <span style="color:var(--ghost)">●</span> out-of-box — walk these to your next bass root${st.allBoxes?'':' · hover or tap a gray dot for its degree, tap again to hide'}`;
     $('jump').style.display='none';
   } else {
     // ---------- song builder ----------
